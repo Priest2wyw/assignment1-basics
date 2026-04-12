@@ -53,8 +53,8 @@ def  train_bpe(input_path: str,
     merges: list[tuple[bytes, bytes]] = []
     
     # 1. init vocab
-    init_tokens = [special_token.encode('utf-8') for special_token in special_tokens] + [
-        bytes(i) for i in  range(256)]
+    init_tokens =  [bytes([i]) for i in  range(256)] + [
+        special_token.encode('utf-8') for special_token in special_tokens] 
     vocab = {idx:token for idx, token in enumerate(init_tokens)}
 
     # 2. parallelizing pre-tokenization
@@ -72,8 +72,10 @@ def  train_bpe(input_path: str,
         # merge
         new_index = len(vocab) 
         merges.append(pair) 
-        vocab[new_index] = "".merge([char1, char2]).encode('utf-8')
-        freq_table = merge(freq_table, pair)
+
+        ## TODO: if the order of special_token is first, how to finish new one
+        vocab[new_index] = vocab[byte_idx1] + vocab[byte_idx2]
+        freq_table = merge(freq_table, pair, new_index)
 
     return vocab, merges
 
