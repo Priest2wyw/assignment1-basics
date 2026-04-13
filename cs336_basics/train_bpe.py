@@ -1,11 +1,58 @@
+import os
 import regex as re
+from typing import BinaryIO
 from collections import Counter
 from collections import defaultdict
-from pretokenization_example import find_chunk_boundaries
 
 from tqdm import tqdm
 
 PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+
+def find_chunk_boundaries(
+    file: BinaryIO,
+    desired_num_chunks: int,
+    split_special_token: bytes,
+) -> list[int]:
+    """
+    Chunk the file into parts that can be counted independently.
+    May return fewer chunks if the boundaries end up overlapping.
+    """
+    assert isinstance(split_special_token, bytes), "Must represent special token as a bytestring"
+
+    # Get total file size in bytes
+    file.seek(0, os.SEEK_END)
+    file_size = file.tell()
+    file.seek(0)
+
+    chunk_size = file_size // desired_num_chunks
+
+    # Initial guesses for chunk boundary locations, uniformly spaced
+    # Chunks start on previous index, don't include last index
+    chunk_boundaries = [i * chunk_size for i in range(desired_num_chunks + 1)]
+    chunk_boundaries[-1] = file_size
+
+    mini_chunk_size = 4096  # Read ahead by 4k bytes at a time
+
+    for bi in range(1, len(chunk_boundaries) - 1):
+        initial_position = chunk_boundaries[bi]
+        file.seek(initial_position)  # Start at boundary guess
+        while True:
+            mini_chunk = file.read(mini_chunk_size)  # Read a mini chunk
+
+            # If EOF, this boundary should be at the end of the file
+            if mini_chunk == b"":
+                chunk_boundaries[bi] = file_size
+                break
+
+            # Find the special token in the mini chunk
+            found_at = mini_chunk.find(split_special_token)
+            if found_at != -1:
+                chunk_boundaries[bi] = initial_position + found_at
+                break
+            initial_position += mini_chunk_size
+
+    # Make sure all boundaries are unique, but might be fewer than desired_num_chunks
+    return sorted(set(chunk_boundaries))
 
 def split_chunk(chunk: str) -> list[str]:
     return re.findall(PAT, chunk)
@@ -27,18 +74,18 @@ def trans_table_from_words_to_bytes(table_freq: dict[str, int]) -> dict[tuple[in
 def pre_tokenize(input_path:str)->dict[tuple[int, ..., int], int]:
     total_counter = Counter()
     with open(input_path, 'rb') as f:
-        num_processes = 8
+        num_processes = 16
         boundaries = find_chunk_boundaries(f, num_processes, b"<|endoftext|>")
     
         for start, end in zip(boundaries[:-1], boundaries[1:]):
             f.seek(start)
             chunk = f.read(end - start).decode("utf-8", errors="ignore")
-            chunk = chunk.replace("<|endoftext|>", "")
-            splited_words = split_chunk(chunk)
-            
-            chunk_counter = Counter(splited_words)
-            
-            total_counter += chunk_counter 
+            splited_chunks = re.split("<|endoftext|>", chunk)
+            for sck in splited_chunks:
+                splited_words = split_chunk(sck)
+                chunk_counter = Counter(splited_words)
+                
+                total_counter += chunk_counter 
         
         freq_table = trans_table_from_words_to_bytes(dict(total_counter))
     return  freq_table
@@ -51,7 +98,7 @@ def get_pair_freqs(freq_table:dict[tuple[int,...,int], int]) -> dict[tuple[int, 
             counter[(byte_idx1, byte_idx2)] += count
     return counter
         
-    
+ 
 def merge(freq_table: dict[tuple[int, ..., int], int], 
           pair: tuple[int, int], 
           new_index: int):
@@ -122,6 +169,6 @@ def  train_bpe(input_path: str,
 
 if __name__ == "__main__":
     input_path = "/home/youwei/github/cs336/assignment1-basics/TinyStoriesV2-GPT4-valid.txt"
-    vocab_size = 10_000
+    vocab_size = 1000
     special_tokens = ["<|endoftext|>"]
     vocab, merges = train_bpe(input_path, vocab_size, special_tokens)
