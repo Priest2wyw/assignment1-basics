@@ -90,19 +90,32 @@ def  train_bpe(input_path: str,
     # 4. merge: caching procedure
     item_step = max(vocab_size - len(vocab), 0)
     for i in tqdm(range(item_step)):
+    # for i in tqdm(range(min(100, item_step))):
         # get 最高频数的pair
         pair_freqs = get_pair_freqs(freq_table)
-        pair = max(pair_freqs, key=pair_freqs.get) 
-        byte_idx1, byte_idx2 = pair
+
+        # # bad inflent
+        # pair = max(pair_freqs, key=pair_freqs.get) 
         
+        # must get the same result using
+        # `preferring the lexicographically greater pair`
+        max_count = max(pair_freqs.values()) 
+        max_count_indx_pairs = [pair for pair, count in pair_freqs.items() if count==max_count]
+        byte_index_pair = max(max_count_indx_pairs, key=lambda p: (vocab[p[0]], vocab[p[1]] ))
+        byte_idx1, byte_idx2 = byte_index_pair
+
+        # # debug block
+        # pair_count = pair_freqs[pair]
+        # if i>=90:
+        #     print(f"Round {i}: chose {(vocab[byte_idx1], vocab[byte_idx2])} (count={pair_count})(max_count_pairs is {max_count_pairs})")
         
         # merge
         new_index = len(vocab) 
-        merges.append(pair) 
+        merges.append((vocab[byte_idx1], vocab[byte_idx2])) 
 
         ## TODO: if the order of special_token is first, how to finish new one
         vocab[new_index] = vocab[byte_idx1] + vocab[byte_idx2]
-        freq_table = merge(freq_table, pair, new_index)
+        freq_table = merge(freq_table, byte_index_pair, new_index)
 
     return vocab, merges
 
