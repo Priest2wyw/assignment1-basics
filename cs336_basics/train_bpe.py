@@ -58,23 +58,18 @@ def merge(freq_table: dict[tuple[int, ..., int], int],
     new_freq_table = {}
     byte_1, byte_2 = pair
     
-    sub_squene_str = str(pair)[1:-1] # remove () 
     for token_ids, count in freq_table.items():
-        # cache: if subsquene not in token_ids, not update 
-        matched_str = str(token_ids) 
-        if sub_squene_str not in matched_str:
-            new_freq_table[token_ids] = count 
-        else:
-            i = 0
-            new_token_ids = []
-            while i < len(token_ids):
-                if i < len(token_ids)-1 and token_ids[i] == byte_1 and token_ids[i+1] == byte_2:
-                    new_token_ids.append(new_index)
-                    i += 2
-                else:
-                    new_token_ids.append(token_ids[i]) 
-                    i += 1
-            new_freq_table[tuple(new_token_ids)] = count
+        # TODO: cache: if subsquene not in token_ids, not update 
+        i = 0
+        new_token_ids = []
+        while i < len(token_ids):
+            if i < len(token_ids)-1 and token_ids[i] == byte_1 and token_ids[i+1] == byte_2:
+                new_token_ids.append(new_index)
+                i += 2
+            else:
+                new_token_ids.append(token_ids[i]) 
+                i += 1
+        new_freq_table[tuple(new_token_ids)] = count
     return new_freq_table
             
 def  train_bpe(input_path: str,
