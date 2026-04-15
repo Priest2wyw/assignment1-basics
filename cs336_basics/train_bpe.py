@@ -1,5 +1,7 @@
 import os
 import regex as re
+from time import time 
+from copy import deepcopy
 from typing import BinaryIO
 from collections import Counter
 from collections import defaultdict
@@ -72,7 +74,9 @@ def trans_table_from_words_to_bytes(table_freq: dict[str, int]) -> dict[tuple[in
     }
 
 def pre_tokenize(input_path:str)->dict[tuple[int, ..., int], int]:
-    total_counter = Counter()
+    # profile process 1: replace counter class with dafaultdict for count number
+    # this can cut down 45% of all procss 
+    total_counter = defaultdict(int)
     with open(input_path, 'rb') as f:
         num_processes = 16
         boundaries = find_chunk_boundaries(f, num_processes, b"<|endoftext|>")
@@ -83,14 +87,22 @@ def pre_tokenize(input_path:str)->dict[tuple[int, ..., int], int]:
             splited_chunks = re.split("<|endoftext|>", chunk)
             for sck in splited_chunks:
                 splited_words = split_chunk(sck)
-                chunk_counter = Counter(splited_words)
-                
-                total_counter += chunk_counter 
+                for word in splited_words:
+                    total_counter[word] += 1
         
         freq_table = trans_table_from_words_to_bytes(dict(total_counter))
     return  freq_table
         
-def get_pair_freqs(freq_table:dict[tuple[int,...,int], int]) -> dict[tuple[int, int], int]:
+# def get_pair_freqs(freq_table:dict[tuple[int,...], int]
+                #    ) -> dict[tuple[int, int], int]:
+    # """get count of pair like (index1, index2)"""
+    # counter = defaultdict(int)
+    # for byte_indexs, count in freq_table.items():
+        # for byte_idx1, byte_idx2 in zip(byte_indexs, byte_indexs[1:]):
+            # counter[(byte_idx1, byte_idx2)] += count
+            # pair_cache[(byte_idx1, byte_idx2)].append(byte_indexs)
+    # return counter
+        
     """get count of pair like (index1, index2)"""
     counter = defaultdict(int)
     for byte_indexs, count in freq_table.items():
@@ -132,8 +144,12 @@ def  train_bpe(input_path: str,
     vocab = {idx:token for idx, token in enumerate(init_tokens)}
 
     # 2. parallelizing pre-tokenization
-    freq_table = pre_tokenize(input_path)
+    print(">>> 1. start pre-token")
+    start_time = time()
+    freq_table = pre_tokenize(input_path) 
+    end_time = time()
     print(f'len of freq_table is {len(freq_table)}')
+    print(f">>> 1. end pre-token, time cost is {end_time - start_time}s")
 
     # 4. merge: caching procedure
     item_step = max(vocab_size - len(vocab), 0)
@@ -168,7 +184,9 @@ def  train_bpe(input_path: str,
     return vocab, merges
 
 if __name__ == "__main__":
-    input_path = "/home/youwei/github/cs336/assignment1-basics/TinyStoriesV2-GPT4-valid.txt"
-    vocab_size = 1000
+    # input_path = "/home/youwei/github/cs336/assignment1-basics/TinyStoriesV2-GPT4-valid.txt"
+    input_path = "/home/youwei/github/cs336/assignment1-basics/TinyStoriesV2-GPT4-train.txt"
+    # input_path = "/home/youwei/github/cs336/assignment1-basics/test_dataset_800k.txt"
+    vocab_size = 10000
     special_tokens = ["<|endoftext|>"]
     vocab, merges = train_bpe(input_path, vocab_size, special_tokens)
