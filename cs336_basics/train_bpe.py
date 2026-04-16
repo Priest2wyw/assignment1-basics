@@ -103,132 +103,135 @@ def pre_tokenize(input_path:str)->dict[tuple[int, ..., int], int]:
             # pair_cache[(byte_idx1, byte_idx2)].append(byte_indexs)
     # return counter
         
- 
-def init_pair_idx_and_count_cache(freq_table:dict[tuple[int,...], int]
-                   ) -> dict[tuple[int, int], 
-                             list[tuple[int,...,int],...]]:
-    """get count of pair like (index1, index2)"""
-    pair_cache = defaultdict(list)
-    counter_cache = defaultdict(int)
-    for byte_indexs, count in freq_table.items():
-        for byte_idx1, byte_idx2 in zip(byte_indexs, byte_indexs[1:]):
-            pair_cache[(byte_idx1, byte_idx2)].append(byte_indexs)
-            counter_cache[(byte_idx1, byte_idx2)] += count
-    return pair_cache, counter_cache
+def init_pair_idx_and_count_cache(freq_table: dict[tuple[int, ...], int]):
+    """
+    初始化两个缓存：
+    - pair_count_cache[pair] = 该 pair 在整个语料中的加权总出现次数
+    - pair_idx_cache[pair]   = Counter，键是包含该 pair 的 token_ids，
+                               值是该 pair 在该 token_ids 内出现的次数
+    """
+    pair_count_cache: dict[tuple[int, int], int] = defaultdict(int)
+    pair_idx_cache: dict[tuple[int, int], Counter] = defaultdict(Counter)
 
-def merge_and_update_cache(freq_table: dict[tuple[int, ..., int], int], 
-          pair: tuple[int, int], 
-          new_index: int,
-          pair_idx_cache, 
-          pair_count_cache):
-    new_freq_table = deepcopy(freq_table)
-    new_pair_idx_cache = deepcopy(pair_idx_cache)
-    new_pair_count_cache = deepcopy(pair_count_cache)
+    for token_ids, freq in freq_table.items():
+        for j in range(len(token_ids) - 1):
+            p = (token_ids[j], token_ids[j + 1])
+            pair_count_cache[p] += freq
+            pair_idx_cache[p][token_ids] += 1
 
+    return dict(pair_idx_cache), dict(pair_count_cache)
+
+
+def _remove_pair_occurrence(pair_idx_cache, pair_count_cache,
+                            p, token_ids, occ_in_seq, freq):
+    """从缓存里扣掉 token_ids 对 pair p 的贡献。"""
+    pair_count_cache[p] -= freq * occ_in_seq
+    if pair_count_cache[p] <= 0:
+        del pair_count_cache[p]
+
+    bucket = pair_idx_cache[p]
+    bucket[token_ids] -= occ_in_seq
+    if bucket[token_ids] <= 0:
+        del bucket[token_ids]
+    if not bucket:
+        del pair_idx_cache[p]
+
+
+def _add_pair_occurrence(pair_idx_cache, pair_count_cache,
+                         p, token_ids, occ_in_seq, freq):
+    """给 token_ids 对 pair p 的贡献加进缓存。"""
+    pair_count_cache[p] = pair_count_cache.get(p, 0) + freq * occ_in_seq
+    if p not in pair_idx_cache:
+        pair_idx_cache[p] = Counter()
+    pair_idx_cache[p][token_ids] += occ_in_seq
+
+
+def merge_and_update_cache(freq_table: dict[tuple[int, ...], int],
+                           pair: tuple[int, int],
+                           new_index: int,
+                           pair_idx_cache: dict,
+                           pair_count_cache: dict):
+    """
+    合并一个 pair，就地更新 freq_table 和两个缓存。
+    """
     byte_1, byte_2 = pair
 
-    # merge freq table 
-    update_token_ids = pair_idx_cache[pair]
-    updated_idx_caches = []
-    for token_ids in update_token_ids:
-        count = new_freq_table.pop(token_ids) # (1,2,3):5
-        new_token_ids = []
-        i = 0
-        token_len = len(token_ids)
-            
-        while i < token_len:
-            if i < token_len-1 and token_ids[i] == byte_1 and token_ids[i+1] == byte_2:
-                new_token_ids.append(new_index)
+    affected = list(pair_idx_cache[pair].items())
+
+    for old_token_ids, _old_occ in affected:
+        freq = freq_table.pop(old_token_ids)
+
+        old_pairs = Counter()
+        for j in range(len(old_token_ids) - 1):
+            old_pairs[(old_token_ids[j], old_token_ids[j + 1])] += 1
+
+        new_list = []
+        i, n = 0, len(old_token_ids)
+        while i < n:
+            if i < n - 1 and old_token_ids[i] == byte_1 and old_token_ids[i + 1] == byte_2:
+                new_list.append(new_index)
                 i += 2
             else:
-                new_token_ids.append(token_ids[i]) 
+                new_list.append(old_token_ids[i])
                 i += 1
-        new_token_ids = tuple(new_token_ids)
-        new_freq_table[new_token_ids] = count
-        updated_idx_caches.append((token_ids, new_token_ids, count))
+        new_token_ids = tuple(new_list)
 
-    # not finish
-    # update idx_cache and count_cache
-    for old_token_ids, new_token_ids, count in updated_idx_caches:
-        # ✅ 第一步：从旧token的所有对中【减去计数】并【移除索引】
-        old_len = len(old_token_ids)
-        for j in range(old_len - 1):
-            p = (old_token_ids[j], old_token_ids[j+1])
-            # 减去这个token对该对的贡献
-            if p in new_pair_count_cache:
-                new_pair_count_cache[p] -= count
-                if new_pair_count_cache[p] <= 0:
-                    del new_pair_count_cache[p]
-            # 从索引中移除旧token
-            if p in new_pair_idx_cache and old_token_ids in new_pair_idx_cache[p]:
-                new_pair_idx_cache[p].remove(old_token_ids)
-                if not new_pair_idx_cache[p]:  # 如果这个pair列表为空
-                    del new_pair_idx_cache[p]
-        
-        # ✅ 第二步：给新token的所有对【加上计数】并【添加索引】
-        new_len = len(new_token_ids)
-        for j in range(new_len - 1):
-            p = (new_token_ids[j], new_token_ids[j+1])
-            new_pair_count_cache[p] = new_pair_count_cache.get(p, 0) + count
-            new_pair_idx_cache[p].append(new_token_ids)
-    
-    # 删除已处理完毕的pair
-    if pair in new_pair_count_cache:
-        del new_pair_count_cache[pair]
-    if pair in new_pair_idx_cache:
-        del new_pair_idx_cache[pair]
+        new_pairs = Counter()
+        for j in range(len(new_token_ids) - 1):
+            new_pairs[(new_token_ids[j], new_token_ids[j + 1])] += 1
 
-    return new_freq_table, new_pair_idx_cache, new_pair_count_cache
-            
-def  train_bpe(input_path: str,
-               vocab_size: int,
-               special_tokens: list[str]
-               ) -> tuple[dict[int, bytes], list[tuple[bytes, bytes]]]:
+        freq_table[new_token_ids] = freq_table.get(new_token_ids, 0) + freq
+
+        for p, occ in old_pairs.items():
+            _remove_pair_occurrence(pair_idx_cache, pair_count_cache,
+                                    p, old_token_ids, occ, freq)
+
+        for p, occ in new_pairs.items():
+            _add_pair_occurrence(pair_idx_cache, pair_count_cache,
+                                 p, new_token_ids, occ, freq)
+
+    assert pair not in pair_count_cache, f"{pair} 残留在 count cache"
+    assert pair not in pair_idx_cache, f"{pair} 残留在 idx cache"
+
+    return freq_table, pair_idx_cache, pair_count_cache
+
+
+def train_bpe(input_path: str,
+              vocab_size: int,
+              special_tokens: list[str]
+              ) -> tuple[dict[int, bytes], list[tuple[bytes, bytes]]]:
     vocab: dict[int, bytes] = {}
     merges: list[tuple[bytes, bytes]] = []
-    
-    # 1. init vocab
-    init_tokens =  [bytes([i]) for i in  range(256)] + [
-        special_token.encode('utf-8') for special_token in special_tokens] 
-    vocab = {idx:token for idx, token in enumerate(init_tokens)}
 
-    # 2. parallelizing pre-tokenization
+    init_tokens = [bytes([i]) for i in range(256)] + [
+        st.encode('utf-8') for st in special_tokens]
+    vocab = {idx: token for idx, token in enumerate(init_tokens)}
+
     print(">>> 1. start pre-token")
-    start_time = time()
-    freq_table = pre_tokenize(input_path) 
-    end_time = time()
-    print(f'len of freq_table is {len(freq_table)}')
-    print(f">>> 1. end pre-token, time cost is {end_time - start_time}s")
+    t0 = time()
+    freq_table = pre_tokenize(input_path)  # 你原来的函数
+    print(f"len of freq_table is {len(freq_table)}")
+    print(f">>> 1. end pre-token, time cost is {time() - t0:.2f}s")
 
-    # 4. merge: caching procedure
-    item_step = max(vocab_size - len(vocab), 0)
     pair_idx_cache, pair_count_cache = init_pair_idx_and_count_cache(freq_table)
-    for i in tqdm(range(item_step)):
-    # for i in tqdm(range(min(100, item_step))):
-        # get 最高频数的pair
-        # most time custer:50% of tottime, 30% of cumtime
-        # pair_freqs = get_pair_freqs(freq_table, pair_cache)
 
-        # # bad inflent
-        # pair = max(pair_freqs, key=pair_freqs.get) 
-         
-        # must get the same result using
-        # `preferring the lexicographically greater pair`
-        max_count = max(pair_count_cache.values()) 
-        max_count_indx_pairs = [pair for pair, count in pair_count_cache.items() if count==max_count]
-        byte_index_pair = max(max_count_indx_pairs, key=lambda p: (vocab[p[0]], vocab[p[1]] ))
-        byte_idx1, byte_idx2 = byte_index_pair
+    n_merges = max(vocab_size - len(vocab), 0)
+    for _ in tqdm(range(n_merges)):
+        if not pair_count_cache:
+            break
 
-        # merge
-        new_index = len(vocab) 
-        merges.append((vocab[byte_idx1], vocab[byte_idx2])) 
+        max_count = max(pair_count_cache.values())
+        candidates = [p for p, c in pair_count_cache.items() if c == max_count]
+        byte_index_pair = max(candidates, key=lambda p: (vocab[p[0]], vocab[p[1]]))
 
-        ## TODO: if the order of special_token is first, how to finish new one
-        vocab[new_index] = vocab[byte_idx1] + vocab[byte_idx2]
-        freq_table, pair_idx_cache, pair_count_cache = merge_and_update_cache(
-            freq_table, byte_index_pair, 
-            new_index, pair_idx_cache, pair_count_cache
-            )
+        new_index = len(vocab)
+        merges.append((vocab[byte_index_pair[0]], vocab[byte_index_pair[1]]))
+        vocab[new_index] = vocab[byte_index_pair[0]] + vocab[byte_index_pair[1]]
+
+        merge_and_update_cache(
+            freq_table, byte_index_pair, new_index,
+            pair_idx_cache, pair_count_cache
+        )
 
     return vocab, merges
 
