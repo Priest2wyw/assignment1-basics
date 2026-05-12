@@ -1,3 +1,5 @@
+from turtle import forward
+
 import torch
 from torch import nn
 from einops import einsum
@@ -67,4 +69,45 @@ class RMSNorm(nn.Module):
         results.to(in_dtype)
         return results
 
+def SiLU(x):
+    return x * torch.sigmoid(x)
+
+class FeedForwardNetwork(nn.Module):
+    """Given the weights of a SwiGLU network, return
+    the output of your implementation with these weights.
+
+    Args:
+        d_model (int): Dimensionality of the feedforward input and output.
+        d_ff (int): Dimensionality of the up-project happening internally to your swiglu.
+        in_features (Float[Tensor, "... d_model"]): Input embeddings to the feed-forward layer.
+
+    Parameter:
+        w1_weight (Float[Tensor, "d_ff d_model"]): Stored weights for W1
+        w2_weight (Float[Tensor, "d_model d_ff"]): Stored weights for W2
+        w3_weight (Float[Tensor, "d_ff d_model"]): Stored weights for W3
+
+
+    Returns:
+        Float[Tensor, "... d_model"]: Output embeddings of the same shape as the input embeddings.
+    """
+    def __init__(self, d_model, d_ff):
+        super().__init__()
+        self.W1 = nn.Parameter(torch.empty(d_ff, d_model))
+        self.W2 = nn.Parameter(torch.empty(d_model, d_ff))
+        self.W3 = nn.Parameter(torch.empty(d_ff, d_model))
+
+        self._init_parameter()
+
+    def _init_parameter(self):
+        nn.init.xavier_uniform_(self.W1) 
+        nn.init.xavier_uniform_(self.W2) 
+        nn.init.xavier_uniform_(self.W3) 
+        
+    def forward(self, in_features):
+        gate = einsum(in_features, self.W1, "... d_model, d_ff d_model -> ... d_ff")
+        value = einsum(in_features, self.W3, "... d_model, d_ff d_model -> ... d_ff")
+        hidden = SiLU(gate) * value
+
+        output = einsum( hidden, self.W2, " ... d_ff, d_ff d_model-> ... d_model")
+        return output
         
