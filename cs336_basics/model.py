@@ -108,6 +108,6 @@ class FeedForwardNetwork(nn.Module):
         value = einsum(in_features, self.W3, "... d_model, d_ff d_model -> ... d_ff")
         hidden = SiLU(gate) * value
 
-        output = einsum( hidden, self.W2, " ... d_ff, d_ff d_model-> ... d_model")
+        output = einsum( hidden, self.W2, " ... d_ff,d_model d_ff -> ... d_model")
         return output
         
