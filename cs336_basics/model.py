@@ -1,8 +1,11 @@
 from turtle import forward
 
+import einx
 import torch
 from torch import nn
-from einops import einsum
+from einops import einsum, rearrange
+from torch import Tensor
+from jaxtyping import Float, Bool, Int
 
 
 class Linear(nn.Module):
@@ -110,4 +113,70 @@ class FeedForwardNetwork(nn.Module):
 
         output = einsum( hidden, self.W2, " ... d_ff,d_model d_ff -> ... d_model")
         return output
+
+class RotaryPositionEmbedding(nn.Module):
+    """
+    Rotary Positional Embedding, RoPE.
+
+    Args:
+        theta: Θ value for RoPE.
+        d_k: Dimension of query and key vectors.
+        max_seq_len: Maximum sequence length that will be input.
+        device: Device to store buffers on.
+    """
+
+    def __init__(
+        self,
+        theta: float,
+        d_k: int,
+        max_seq_len: int,
+        device: torch.device | None = None,
+    ):
+        super().__init__()
+        self.register_buffer(
+            "_freq_cis_cache",
+            RotaryPositionEmbedding._init_cache(max_seq_len, d_k, theta), persistent=False
+        )
+
+    @staticmethod 
+    def _init_cache(max_seq_len, d_k, theta ):
+        d = torch.arange(0, d_k, 2)/d_k
+        freqs = theta** - d
+        t = torch.arange(0, max_seq_len)
         
+        freqs = einsum(t, freqs, "t,d-> t d") 
+        cos, sin = torch.cos(freqs), torch.sin(freqs)
+        return torch.stack((cos, sin))
+        
+    def forward(self, x: Float[Tensor, " ... seq d"], pos_ids: Int[Tensor, " ... seq"]) -> Float[Tensor, " ... seq d"]:
+        """
+        Apply RoPE to input tensor.
+
+        Args:
+            x:
+                Input tensor of shape (..., seq_len, d_k).
+                It may have arbitrary batch dimensions.
+
+            token_positions:
+                Tensor of shape (..., seq_len), specifying the token positions
+                along the sequence dimension.
+
+        Returns:
+            Tensor of the same shape as x: (..., seq_len, d_k).
+        """
+        x1, x2 = rearrange(x, '... (half_d xy) -> xy ... half_d', xy=2)
+
+        # Standard
+        # cos, sin = self._freq_cis_cache[:, pos_ids, :]
+
+        # einx
+        cos, sin = einx.get_at('cos_sin [pos] half_dim, ... -> cos_sin ... half_dim', self._freq_cis_cache, pos_ids)
+
+        # 2D rotation matrix applied to pairs in x
+        x1_rot = cos * x1 - sin * x2
+        x2_rot = sin * x1 + cos * x2
+        result = einx.rearrange('... x_half, ... x_half -> ... (x_half (1 + 1))', x1_rot, x2_rot).contiguous()
+        return result
+    
+    def extra_repr(self):
+        return f"context_length={self._freq_cis_cache.shape[0]}, dim/2={self._freq_cis_cache.shape[1]}"
