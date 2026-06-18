@@ -11,7 +11,7 @@ from jaxtyping import Bool, Float, Int
 from torch import Tensor
 from cs336_basics.train_bpe import train_bpe
 from cs336_basics.tokenizer import Tokenizer
-from cs336_basics.model import Linear, Embedding, RMSNorm, FeedForwardNetwork, RotaryPositionEmbedding
+from cs336_basics.model import CauseMultheadSelfAttention, Linear, Embedding, RMSNorm, FeedForwardNetwork, RotaryPositionEmbedding
 from cs336_basics.model import softmax, scaled_dot_product_attention
 
 
@@ -148,8 +148,16 @@ def run_multihead_self_attention(
         Float[Tensor, " ... sequence_length d_model"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
-    raise NotImplementedError
-
+    cause_mult_att = CauseMultheadSelfAttention(d_model=d_model, num_heads=num_heads)
+    state_dict = {
+        "q_project.W": q_proj_weight,
+        "k_project.W": k_proj_weight,
+        "v_project.W": v_proj_weight,
+        "o_project.W": o_proj_weight,
+    }
+    cause_mult_att.load_state_dict(state_dict=state_dict)
+    out = cause_mult_att.forward(in_features=in_features)
+    return out
 
 def run_multihead_self_attention_with_rope(
     d_model: int,
@@ -188,8 +196,21 @@ def run_multihead_self_attention_with_rope(
         Float[Tensor, " ... sequence_length d_model"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
-    raise NotImplementedError
-
+    positon_encoder = RotaryPositionEmbedding(d_k = int(d_model/num_heads), max_seq_len=max_seq_len)
+    cause_mult_att = CauseMultheadSelfAttention(
+        d_model=d_model, 
+        num_heads=num_heads, 
+        positional_encoder=positon_encoder
+        )
+    state_dict = {
+        "q_project.W": q_proj_weight,
+        "k_project.W": k_proj_weight,
+        "v_project.W": v_proj_weight,
+        "o_project.W": o_proj_weight,
+    }
+    cause_mult_att.load_state_dict(state_dict=state_dict)
+    out = cause_mult_att(in_features=in_features)
+    return out
 
 def run_rope(
     d_k: int,
@@ -216,7 +237,6 @@ def run_rope(
         theta=theta,
         )
 
-    # 确保 buffer 跟输入在同一个 device 上
     rope = rope.to(in_query_or_key.device)
 
     return rope(in_query_or_key, token_positions)

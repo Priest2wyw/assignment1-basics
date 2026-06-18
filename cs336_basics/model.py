@@ -1,6 +1,3 @@
-from re import S
-from turtle import forward
-
 import einx
 import torch
 from torch import nn
@@ -128,10 +125,10 @@ class RotaryPositionEmbedding(nn.Module):
 
     def __init__(
         self,
-        theta: float,
         d_k: int,
         max_seq_len: int,
         device: torch.device | None = None,
+        theta: float=10_000.0,
     ):
         super().__init__()
         if d_k % 2 != 0:
@@ -180,7 +177,7 @@ def scaled_dot_product_attention(
     mask: Bool[Tensor, " ... queries keys"] | None = None,
     ) -> Float[Tensor, " ... queries d_v"]:
     d_k = Q.shape[-1]
-    attention_matix = einsum(Q,K,"... q d_k, ... k d_k -> ... q k")/ (d_k)**(0.5)
+    attention_matix = einsum(Q,K,"... q d_k, ... k d_k -> ... q k")/ (d_k**(0.5))
     # add mask
     masked_atten = attention_matix.masked_fill(~mask, -torch.inf)
     atten_prob = softmax(masked_atten, dim=-1)
@@ -189,4 +186,65 @@ def scaled_dot_product_attention(
     return atten_score
     
     
+class CauseMultheadSelfAttention(nn.Module):
+    """
+    Args:
+        d_model: dimon of model
+        num_heads: number of heads
+        positional_encoder: position encoder ,default use rope 
+    Output:
+        output: Float[Tensor, " ... sequence_length d_model"]:
+    """
     
+    def __init__(self, d_model: int, 
+                 num_heads: int,
+                 positional_encoder: RotaryPositionEmbedding|None=None):
+        super().__init__()
+        assert d_model % num_heads == 0
+        # ASSUME: d_k = d_v = d_model/num_heads
+        self.d_model = d_model
+        self.num_heads = num_heads
+        self.d_k = d_model/num_heads
+        self.d_v = d_model/num_heads
+
+        self.q_project = Linear(d_model, int(num_heads*self.d_k) )
+        self.k_project = Linear(d_model, int(num_heads*self.d_k) )
+        self.v_project = Linear(d_model, int(num_heads*self.d_v) )
+        self.o_project = Linear(int(num_heads*self.d_v), d_model)
+        self.positional_encoder = positional_encoder
+
+    def forward(self, in_features: Float[Tensor, " ... sequence_length d_model"], token_positions=None):
+        *b, seq_len, d_model = in_features.size()
+        Q = self.q_project(in_features)# ... seq_len num_head*d_k
+        K = self.k_project(in_features)# ... seq_len num_head*d_k
+        V = self.v_project(in_features)# ... seq_len num_head*d_v
+
+        Q = rearrange(Q, "... seq (num_head d_k) -> ... num_head seq d_k", num_head=self.num_heads)
+        K = rearrange(K, "... seq (num_head d_k) -> ... num_head seq d_k", num_head=self.num_heads)
+        V = rearrange(V, "... seq (num_head d_v) -> ... num_head seq d_v", num_head=self.num_heads)
+
+        # add token positions
+        if self.positional_encoder is not None:
+            if token_positions is None:
+                token_positions = einx.rearrange("seq -> b... seq", torch.arange(seq_len, device=in_features.device), b=[1] * len(b))
+
+            # Duplicate token positions for each head
+            token_positions = rearrange(token_positions, "... seq -> ... 1 seq")
+            Q = self.positional_encoder(Q, token_positions)
+            K = self.positional_encoder(K, token_positions)
+            
+        # build mask matrix
+        # torch.triu(torch.ones([3,3]), diagonal=1)
+        # tensor([[0., 1., 1.],
+        #         [0., 0., 1.],
+        #         [0., 0., 0.]])
+        masked_matrix = torch.triu(torch.ones([seq_len, seq_len]), diagonal=1) < 0.5
+        atten_out = scaled_dot_product_attention(Q=Q, K=K, V=V, mask=masked_matrix) # ... num_head seq d_v
+        
+        # W_O: d_model*(num_head d_v)
+        atten_out = rearrange(atten_out, "... num_head seq d_v-> ... seq (num_head d_v)")
+        output = self.o_project(atten_out)
+        return output 
+        
+        
+        
