@@ -1,9 +1,10 @@
+from re import S
 from turtle import forward
 
 import einx
 import torch
 from torch import nn
-from einops import einsum, rearrange
+from einops import einsum, rearrange, reduce
 from torch import Tensor
 from jaxtyping import Float, Bool, Int
 
@@ -133,50 +134,59 @@ class RotaryPositionEmbedding(nn.Module):
         device: torch.device | None = None,
     ):
         super().__init__()
-        self.register_buffer(
-            "_freq_cis_cache",
-            RotaryPositionEmbedding._init_cache(max_seq_len, d_k, theta), persistent=False
-        )
+        if d_k % 2 != 0:
+            raise ValueError("d_k must be even for RoPE")
 
-    @staticmethod 
-    def _init_cache(max_seq_len, d_k, theta ):
-        d = torch.arange(0, d_k, 2)/d_k
-        freqs = theta** - d
-        t = torch.arange(0, max_seq_len)
+        dim_index = torch.arange(0, d_k, 2, device=device).float()
+        denominator = 1 / (theta ** (dim_index / d_k))
         
-        freqs = einsum(t, freqs, "t,d-> t d") 
-        cos, sin = torch.cos(freqs), torch.sin(freqs)
-        return torch.stack((cos, sin))
+        position = torch.arange(max_seq_len, device=device).float()
+        angles = torch.outer(position, denominator)
         
-    def forward(self, x: Float[Tensor, " ... seq d"], pos_ids: Int[Tensor, " ... seq"]) -> Float[Tensor, " ... seq d"]:
-        """
-        Apply RoPE to input tensor.
-
-        Args:
-            x:
-                Input tensor of shape (..., seq_len, d_k).
-                It may have arbitrary batch dimensions.
-
-            token_positions:
-                Tensor of shape (..., seq_len), specifying the token positions
-                along the sequence dimension.
-
-        Returns:
-            Tensor of the same shape as x: (..., seq_len, d_k).
-        """
-        x1, x2 = rearrange(x, '... (half_d xy) -> xy ... half_d', xy=2)
-
-        # Standard
-        # cos, sin = self._freq_cis_cache[:, pos_ids, :]
-
-        # einx
-        cos, sin = einx.get_at('cos_sin [pos] half_dim, ... -> cos_sin ... half_dim', self._freq_cis_cache, pos_ids)
-
-        # 2D rotation matrix applied to pairs in x
-        x1_rot = cos * x1 - sin * x2
-        x2_rot = sin * x1 + cos * x2
-        result = einx.rearrange('... x_half, ... x_half -> ... (x_half (1 + 1))', x1_rot, x2_rot).contiguous()
-        return result
+        self.register_buffer("sin_cache", torch.sin(angles), persistent= False)
+        self.register_buffer("cos_cache", torch.cos(angles), persistent= False)
+        
     
-    def extra_repr(self):
-        return f"context_length={self._freq_cis_cache.shape[0]}, dim/2={self._freq_cis_cache.shape[1]}"
+    def forward(self, x: torch.Tensor, token_positions: torch.Tensor) -> torch.Tensor: 
+        x_even = x[..., 0::2]
+        x_odd = x [..., 1::2]
+        
+        cos = self.cos_cache[token_positions].to(x.dtype)
+        sin = self.sin_cache[token_positions].to(x.dtype)
+
+        out_even = x_even*cos - x_odd*sin
+        out_odd = x_even*sin + x_odd*cos
+
+        out = torch.empty_like(x)
+        out[..., 0::2] = out_even
+        out[..., 1::2] = out_odd
+
+        return out
+
+def softmax(x: torch.tensor, dim:int)-> torch.tensor:
+    x_max = torch.max(x, dim=dim, keepdim=True).values
+    x = x - x_max
+    
+    x_exp = torch.exp(x)
+    sum_exp = torch.sum(x_exp, dim=dim, keepdim=True)
+    soft_max = x_exp /  sum_exp
+    
+    return soft_max
+
+def scaled_dot_product_attention(
+    Q: Float[Tensor, " ... queries d_k"],
+    K: Float[Tensor, " ... keys d_k"],
+    V: Float[Tensor, " ... keys d_v"],
+    mask: Bool[Tensor, " ... queries keys"] | None = None,
+    ) -> Float[Tensor, " ... queries d_v"]:
+    d_k = Q.shape[-1]
+    attention_matix = einsum(Q,K,"... q d_k, ... k d_k -> ... q k")/ (d_k)**(0.5)
+    # add mask
+    masked_atten = attention_matix.masked_fill(~mask, -torch.inf)
+    atten_prob = softmax(masked_atten, dim=-1)
+    # value
+    atten_score =  einsum(atten_prob, V, " ... q k, ... k d_v -> ... q d_v")
+    return atten_score
+    
+    
+    
