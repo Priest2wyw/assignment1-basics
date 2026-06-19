@@ -37,12 +37,17 @@ class Embedding(nn.Module):
             dtype: torch.dtype | None = None  Data type of the parameters
         """
         super().__init__()
-        self.W = torch.empty((num_embeddings, embedding_dim), device=device, dtype=dtype)
-        torch.nn.init.trunc_normal_(self.W, mean = 0, std=1, a=-3, b=3)
+        self.weight = nn.Parameter(
+            torch.empty(
+                (num_embeddings, embedding_dim), 
+                device=device, dtype=dtype
+                )
+            )
+        torch.nn.init.trunc_normal_(self.weight, mean = 0, std=1, a=-3, b=3)
 
     def forward(self, token_ids: torch.Tensor) -> torch.Tensor:
         """Lookup the embedding vectors for the given token IDs"""
-        return self.W[token_ids]
+        return self.weight[token_ids]
 
 class RMSNorm(nn.Module):
     def __init__(self, d_model: int, eps: float = 1e-5, device=None, dtype=None):
@@ -280,4 +285,71 @@ class TransformerBlock(nn.Module):
         return block_out
         
 
-        
+class BasicsTransformerLM(nn.Module):
+    """A Transformer language model.
+
+    Args:
+        vocab_size: int
+            The number of unique items in the output vocabulary to be predicted.
+        context_length: int,
+            The maximum number of tokens to process at once.
+        d_model: int
+            The dimensionality of the model embeddings and sublayer outputs.
+        num_layers: int
+            The number of Transformer layers to use.
+        num_heads: int
+            Number of heads to use in multi-headed attention. `d_model` must be
+            evenly divisible by `num_heads`.
+        d_ff: int
+            Dimensionality of the feed-forward inner layer (section 3.3).
+        rope_theta: float
+            The theta value for the RoPE positional encoding.
+
+    Returns:
+        FloatTensor of shape (batch size, sequence_length, vocab_size) with the
+        predicted unnormalized next-word distribution for each token.
+    """
+    def __init__(
+        self,
+        vocab_size: int,
+        context_length: int,
+        d_model: int,
+        num_layers: int,
+        num_heads: int,
+        d_ff: int,
+        rope_theta: float,
+    ):
+        super().__init__()
+        self.d_ff = d_ff
+        self.d_model = d_model
+        self.num_heads = num_heads
+        self.d_k = int(d_model/num_heads)
+        self.num_layers = num_layers
+        self.vocab_size = vocab_size
+        self.context_length = context_length
+
+        self.position_encoder = RotaryPositionEmbedding(
+            d_k = self.d_k, 
+            max_seq_len=context_length, 
+            theta = rope_theta
+            )
+        self.token_embeddings = Embedding(num_embeddings=vocab_size, embedding_dim=d_model)
+        self.layers = nn.ModuleList(
+            [TransformerBlock(
+                d_model=d_model,
+                num_heads=num_heads,
+                d_ff = d_ff,
+                position_encoder=self.position_encoder
+            ) 
+            for i in range(num_layers)]
+        )
+        self.ln_final = RMSNorm(d_model=d_model)
+        self.lm_head = Linear(in_features=d_model, out_features=vocab_size)
+
+    def forward(self, in_indics:Int[Tensor, "batch_size sequence_length"])->Float[Tensor, "batch_size sequence_length vocab_size"]:
+        embds = self.token_embeddings(in_indics)
+        for layer in self.layers:
+            embds = layer(embds)
+        embds = self.ln_final(embds)
+        embds = self.lm_head(embds)
+        return embds

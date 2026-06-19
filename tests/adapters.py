@@ -1,12 +1,11 @@
 from __future__ import annotations
 
+from multiprocessing import context
 import os
 from collections.abc import Iterable
-from turtle import position
 from typing import IO, Any, BinaryIO
 
 import numpy.typing as npt
-from regex import T
 import torch
 from torch import rms_norm
 from jaxtyping import Bool, Float, Int
@@ -14,7 +13,7 @@ from torch import Tensor
 from cs336_basics.train_bpe import train_bpe
 from cs336_basics.tokenizer import Tokenizer
 from cs336_basics.model import CauseMultheadSelfAttention, Linear, Embedding, RMSNorm
-from cs336_basics.model import FeedForwardNetwork, RotaryPositionEmbedding, TransformerBlock
+from cs336_basics.model import FeedForwardNetwork, RotaryPositionEmbedding, TransformerBlock, BasicsTransformerLM
 from cs336_basics.model import softmax, scaled_dot_product_attention
 
 
@@ -61,7 +60,7 @@ def run_embedding(
     """
 
     embd = Embedding(vocab_size, d_model)
-    embd.W = torch.nn.Parameter(weights)
+    embd.weight = torch.nn.Parameter(weights)
 
     return embd.forward(token_ids=token_ids)
 
@@ -160,6 +159,7 @@ def run_multihead_self_attention(
     }
     cause_mult_att.load_state_dict(state_dict=state_dict)
     out = cause_mult_att.forward(in_features=in_features)
+    
     return out
 
 def run_multihead_self_attention_with_rope(
@@ -412,8 +412,20 @@ def run_transformer_lm(
         Float[Tensor, "batch_size sequence_length vocab_size"]: Tensor with the predicted unnormalized
         next-word distribution for each token.
     """
-    raise NotImplementedError
+    transformer_lm = BasicsTransformerLM(
+        vocab_size=vocab_size,
+        context_length=context_length,
+        d_model=d_model,
+        num_layers=num_layers,
+        num_heads=num_heads,
+        d_ff=d_ff,
+        rope_theta=rope_theta,
+    )
+    transformer_lm.load_state_dict(weights)
+    
+    output = transformer_lm(in_indices)
 
+    return output
 
 def run_rmsnorm(
     d_model: int,
