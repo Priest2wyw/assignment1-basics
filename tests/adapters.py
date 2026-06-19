@@ -2,16 +2,19 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterable
+from turtle import position
 from typing import IO, Any, BinaryIO
 
 import numpy.typing as npt
+from regex import T
 import torch
 from torch import rms_norm
 from jaxtyping import Bool, Float, Int
 from torch import Tensor
 from cs336_basics.train_bpe import train_bpe
 from cs336_basics.tokenizer import Tokenizer
-from cs336_basics.model import CauseMultheadSelfAttention, Linear, Embedding, RMSNorm, FeedForwardNetwork, RotaryPositionEmbedding
+from cs336_basics.model import CauseMultheadSelfAttention, Linear, Embedding, RMSNorm
+from cs336_basics.model import FeedForwardNetwork, RotaryPositionEmbedding, TransformerBlock
 from cs336_basics.model import softmax, scaled_dot_product_attention
 
 
@@ -34,7 +37,7 @@ def run_linear(
         Float[Tensor, "... d_out"]: The transformed output of your linear module.
     """
     linear = Linear(d_out, d_in)
-    linear.W = torch.nn.Parameter(weights)
+    linear.weight = torch.nn.Parameter(weights)
     return linear.forward(in_features)
 
 
@@ -87,9 +90,9 @@ def run_swiglu(
     """
     swiglu = FeedForwardNetwork(d_ff=d_ff, d_model=d_model)
     state_dict = {
-        "W1": w1_weight,
-        "W2": w2_weight,
-        "W3": w3_weight,
+        "w1.weight": w1_weight,
+        "w2.weight": w2_weight,
+        "w3.weight": w3_weight,
     }
     swiglu.load_state_dict(state_dict=state_dict)
     
@@ -150,10 +153,10 @@ def run_multihead_self_attention(
     """
     cause_mult_att = CauseMultheadSelfAttention(d_model=d_model, num_heads=num_heads)
     state_dict = {
-        "q_project.W": q_proj_weight,
-        "k_project.W": k_proj_weight,
-        "v_project.W": v_proj_weight,
-        "o_project.W": o_proj_weight,
+        "q_proj.weight": q_proj_weight,
+        "k_proj.weight": k_proj_weight,
+        "v_proj.weight": v_proj_weight,
+        "output_proj.weight": o_proj_weight,
     }
     cause_mult_att.load_state_dict(state_dict=state_dict)
     out = cause_mult_att.forward(in_features=in_features)
@@ -203,10 +206,10 @@ def run_multihead_self_attention_with_rope(
         positional_encoder=positon_encoder
         )
     state_dict = {
-        "q_project.W": q_proj_weight,
-        "k_project.W": k_proj_weight,
-        "v_project.W": v_proj_weight,
-        "o_project.W": o_proj_weight,
+        "q_proj.weight": q_proj_weight,
+        "k_proj.weight": k_proj_weight,
+        "v_proj.weight": v_proj_weight,
+        "output_proj.weight": o_proj_weight,
     }
     cause_mult_att.load_state_dict(state_dict=state_dict)
     out = cause_mult_att(in_features=in_features)
@@ -312,7 +315,22 @@ def run_transformer_block(
         Float[Tensor, "batch sequence_length d_model"] Tensor with the output of
         running the Transformer block on the input features while using RoPE.
     """
-    raise NotImplementedError
+    d_k = int(d_model/num_heads)
+    position_encoder = RotaryPositionEmbedding(
+        d_k = d_k, 
+        max_seq_len=max_seq_len, 
+        theta=theta
+    )
+    transformer_block = TransformerBlock(
+        d_model=d_model, 
+        num_heads=num_heads, 
+        d_ff=d_ff, 
+        position_encoder=position_encoder
+    )
+    transformer_block.load_state_dict(state_dict=weights)
+    
+    return transformer_block(in_features)
+    
 
 
 def run_transformer_lm(
@@ -418,7 +436,7 @@ def run_rmsnorm(
         RMSNorm of the `in_features`.
     """
     rms_norm = RMSNorm(d_model=d_model, eps=eps)
-    rms_norm.g = torch.nn.Parameter(weights)
+    rms_norm.weight = torch.nn.Parameter(weights)
     
     return rms_norm.forward(in_features)
 

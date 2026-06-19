@@ -1,3 +1,5 @@
+from turtle import forward
+
 import einx
 import torch
 from torch import nn
@@ -18,12 +20,12 @@ class Linear(nn.Module):
             def forward(self, x: torch.Tensor) -> torch.Tensor
         """
         super().__init__()
-        self.W = nn.Parameter(torch.empty((out_features, in_features), device=device, dtype=dtype))
+        self.weight = nn.Parameter(torch.empty((out_features, in_features), device=device, dtype=dtype))
         std = (2/(in_features + out_features))**0.5 # std 
-        nn.init.trunc_normal_(self.W ,mean=0, std=std, a=-3, b=3)
+        nn.init.trunc_normal_(self.weight ,mean=0, std=std, a=-3, b=3)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return einsum(self.W, x, "d_out d_in, ... d_in-> ... d_out")
+        return einsum(self.weight, x, "d_out d_in, ... d_in-> ... d_out")
 
 class Embedding(nn.Module):
     def __init__(self, num_embeddings, embedding_dim, device=None, dtype=None):
@@ -52,7 +54,7 @@ class RMSNorm(nn.Module):
             dtype: torch.dtype | None = None  Data type of the parameters
         """
         super().__init__()
-        self.g = nn.Parameter(torch.ones(d_model, device=device, dtype=dtype))
+        self.weight = nn.Parameter(torch.ones(d_model, device=device, dtype=dtype))
         self.d = d_model
         self.eps = eps
         
@@ -64,7 +66,7 @@ class RMSNorm(nn.Module):
         
         # compute rmsnorm
         rms = torch.sqrt(torch.mean(torch.square(x), dim=-1, keepdim=True)+self.eps)
-        results = torch.mul(x, self.g)
+        results = torch.mul(x, self.weight)
         results = torch.mul(results, 1/rms)
         
         results.to(in_dtype)
@@ -93,23 +95,16 @@ class FeedForwardNetwork(nn.Module):
     """
     def __init__(self, d_model, d_ff):
         super().__init__()
-        self.W1 = nn.Parameter(torch.empty(d_ff, d_model))
-        self.W2 = nn.Parameter(torch.empty(d_model, d_ff))
-        self.W3 = nn.Parameter(torch.empty(d_ff, d_model))
-
-        self._init_parameter()
-
-    def _init_parameter(self):
-        nn.init.xavier_uniform_(self.W1) 
-        nn.init.xavier_uniform_(self.W2) 
-        nn.init.xavier_uniform_(self.W3) 
+        self.w1 = Linear(d_model, d_ff   )
+        self.w2 = Linear(d_ff   , d_model)
+        self.w3 = Linear(d_model, d_ff   )
         
     def forward(self, in_features):
-        gate = einsum(in_features, self.W1, "... d_model, d_ff d_model -> ... d_ff")
-        value = einsum(in_features, self.W3, "... d_model, d_ff d_model -> ... d_ff")
+        gate = self.w1(in_features)
+        value = self.w3(in_features) 
         hidden = SiLU(gate) * value
 
-        output = einsum( hidden, self.W2, " ... d_ff,d_model d_ff -> ... d_model")
+        output = self.w2(hidden)
         return output
 
 class RotaryPositionEmbedding(nn.Module):
@@ -160,7 +155,7 @@ class RotaryPositionEmbedding(nn.Module):
 
         return out
 
-def softmax(x: torch.tensor, dim:int)-> torch.tensor:
+def softmax(x: Tensor, dim:int)-> Tensor:
     x_max = torch.max(x, dim=dim, keepdim=True).values
     x = x - x_max
     
@@ -207,17 +202,17 @@ class CauseMultheadSelfAttention(nn.Module):
         self.d_k = d_model/num_heads
         self.d_v = d_model/num_heads
 
-        self.q_project = Linear(d_model, int(num_heads*self.d_k) )
-        self.k_project = Linear(d_model, int(num_heads*self.d_k) )
-        self.v_project = Linear(d_model, int(num_heads*self.d_v) )
-        self.o_project = Linear(int(num_heads*self.d_v), d_model)
+        self.q_proj = Linear(d_model, int(num_heads*self.d_k) )
+        self.k_proj = Linear(d_model, int(num_heads*self.d_k) )
+        self.v_proj = Linear(d_model, int(num_heads*self.d_v) )
+        self.output_proj = Linear(int(num_heads*self.d_v), d_model)
         self.positional_encoder = positional_encoder
 
     def forward(self, in_features: Float[Tensor, " ... sequence_length d_model"], token_positions=None):
         *b, seq_len, d_model = in_features.size()
-        Q = self.q_project(in_features)# ... seq_len num_head*d_k
-        K = self.k_project(in_features)# ... seq_len num_head*d_k
-        V = self.v_project(in_features)# ... seq_len num_head*d_v
+        Q = self.q_proj(in_features)# ... seq_len num_head*d_k
+        K = self.k_proj(in_features)# ... seq_len num_head*d_k
+        V = self.v_proj(in_features)# ... seq_len num_head*d_v
 
         Q = rearrange(Q, "... seq (num_head d_k) -> ... num_head seq d_k", num_head=self.num_heads)
         K = rearrange(K, "... seq (num_head d_k) -> ... num_head seq d_k", num_head=self.num_heads)
@@ -228,6 +223,7 @@ class CauseMultheadSelfAttention(nn.Module):
             if token_positions is None:
                 token_positions = einx.rearrange("seq -> b... seq", torch.arange(seq_len, device=in_features.device), b=[1] * len(b))
 
+            # TODO: why do this? explain this 
             # Duplicate token positions for each head
             token_positions = rearrange(token_positions, "... seq -> ... 1 seq")
             Q = self.positional_encoder(Q, token_positions)
@@ -243,8 +239,45 @@ class CauseMultheadSelfAttention(nn.Module):
         
         # W_O: d_model*(num_head d_v)
         atten_out = rearrange(atten_out, "... num_head seq d_v-> ... seq (num_head d_v)")
-        output = self.o_project(atten_out)
+        output = self.output_proj(atten_out)
         return output 
+
+class TransformerBlock(nn.Module):
+    """
+        Args:
+        d_model (int): The dimensionality of the Transformer block input.
+        num_heads (int): Number of heads to use in multi-headed attention. `d_model` must be
+            evenly divisible by `num_heads`.
+        d_ff (int): Dimensionality of the feed-forward inner layer.
+        max_seq_len (int): Maximum sequence length to pre-cache if your implementation does that.
+        in_features (Float[Tensor, "batch sequence_length d_model"]):
+            Tensor to run your implementation on.
+
+    Returns:
+        Float[Tensor, "batch sequence_length d_model"] Tensor with the output of
+        running the Transformer block on the input features while using RoPE.
+    """
+    def __init__(self, d_model: int, num_heads: int, d_ff: int, position_encoder: RotaryPositionEmbedding):
+        super().__init__()
+        self.attn = CauseMultheadSelfAttention(
+            d_model=d_model, 
+            num_heads=num_heads, 
+            positional_encoder=position_encoder
+            )
+        self.ln1 = RMSNorm(d_model=d_model)
+        self.ln2 = RMSNorm(d_model=d_model)
+        self.ffn = FeedForwardNetwork(d_model=d_model, d_ff=d_ff)
+    
+    def forward(self, x:Float[Tensor, "batch sequence_length d_model"])->Float[Tensor, "batch sequence_length d_model"]:
+        ln1_out = self.ln1(x) # batch sequence_length d_model
+        attention_out = self.attn(ln1_out)
+        pre_norm_attantion = x + attention_out
         
+        ln2_out = self.ln2(pre_norm_attantion)
+        ffn_out = self.ffn(ln2_out)
+        block_out = ffn_out + pre_norm_attantion
         
+        return block_out
+        
+
         
