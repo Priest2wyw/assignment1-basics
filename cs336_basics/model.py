@@ -1,4 +1,9 @@
+
 import logging
+from math import sqrt
+from collections.abc import Callable
+from typing import Optional
+
 import einx
 import torch
 from torch import nn
@@ -392,7 +397,66 @@ def cross_entropy(input:Float[Tensor, "batch_size vocab_size"],
     
     return simple_prob.mean()
     
-        
+    
+class AdamW(torch.optim.Optimizer):
+    def __init__(self, params, lr, betas, eps, weight_decay):
+        if lr < 0:
+            raise ValueError(f"Invalid learning rate: {lr}")
+        if eps < 0:
+            raise ValueError(f"Invalid learning rate: {eps}")
+        if weight_decay < 0:
+            raise ValueError(f"Invalid learning rate: {weight_decay}")
+
+        defaults = {"lr": lr, "betas": betas, "eps":eps, "weight_decay":weight_decay}
+        super().__init__(params, defaults)
+
+    @torch.no_grad()
+    def step(self, closure: Optional[Callable] = None):
+        loss = None
+
+        if closure is not None:
+            # closure 里通常会重新 zero_grad / forward / backward
+            with torch.enable_grad():
+                loss = closure()
+
+        for group in self.param_groups:
+            lr = group["lr"]
+            eps = group["eps"]
+            weight_decay = group["weight_decay"]
+            beta1, beta2 = group['betas']
+            
+            for p in group["params"]:
+                if p.grad is None:
+                    continue
+
+                # 每个参数 p 都有自己的 state 字典
+                state = self.state[p]
+
+                # 取当前参数的更新次数；第一次默认是 0
+                t = state.get("t", 1)
+                if t == 1:
+                    state['first_moment'] = torch.zeros_like(p)
+                    state['second_moment'] = torch.zeros_like(p)
+                
+                m = state.get('first_moment')  
+                v = state.get('second_moment') 
+
+                grad = p.grad
+                lr_t = lr * (sqrt(1-beta2**t)/(1-beta1**t))
+
+                # theta = theta - lr*weight_decay*theta
+                p -= lr * weight_decay * p
+                m = beta1 * m + (1 - beta1)*grad
+                v = beta2 * v + (1 - beta2)*(grad**2)
+                state["first_moment"] = m
+                state["second_moment"] = v
+                
+                p -= lr_t * m / (torch.sqrt(v)+eps)
+                # 更新 step 计数
+                state["t"] = t + 1
+                
+        return loss
+
 if __name__ == "__main__":
     vocab_size=50257
     context_length= 1024
