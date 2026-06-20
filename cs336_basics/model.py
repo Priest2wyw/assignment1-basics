@@ -1,5 +1,4 @@
-from turtle import forward
-
+import logging
 import einx
 import torch
 from torch import nn
@@ -7,6 +6,7 @@ from einops import einsum, rearrange, reduce
 from torch import Tensor
 from jaxtyping import Float, Bool, Int
 
+logger = logging.getLogger(__name__)
 
 class Linear(nn.Module):
     def __init__(self, in_features, out_features, device=None, dtype=None):
@@ -345,6 +345,9 @@ class BasicsTransformerLM(nn.Module):
         )
         self.ln_final = RMSNorm(d_model=d_model)
         self.lm_head = Linear(in_features=d_model, out_features=vocab_size)
+       
+        para_numb = self.get_para_number()/ 10**6 
+        logger.error(f"number of paras is {para_numb:,.3f}M, if single-precision floating poinit need {4* para_numb:,.3f}M ")
 
     def forward(self, in_indics:Int[Tensor, "batch_size sequence_length"])->Float[Tensor, "batch_size sequence_length vocab_size"]:
         embds = self.token_embeddings(in_indics)
@@ -353,3 +356,19 @@ class BasicsTransformerLM(nn.Module):
         embds = self.ln_final(embds)
         embds = self.lm_head(embds)
         return embds
+
+    def get_para_number(self, no_embd = True):
+        all_number = sum([b.numel() for b in self.parameters()])
+
+        if no_embd:
+            all_number -= self.lm_head.weight.numel()
+        return all_number
+        
+if __name__ == "__main__":
+    vocab_size=50257
+    context_length= 1024
+    num_layers= 48
+    d_model= 1600
+    num_heads= 25
+    d_ff= 4288
+    gpt_2_xl = BasicsTransformerLM(vocab_size, context_length, d_model, num_layers, num_heads, d_ff, rope_theta=10000)
