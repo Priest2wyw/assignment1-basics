@@ -363,6 +363,35 @@ class BasicsTransformerLM(nn.Module):
         if no_embd:
             all_number -= self.lm_head.weight.numel()
         return all_number
+
+def cross_entropy(input:Float[Tensor, "batch_size vocab_size"], 
+                  target:Float[Tensor, "batch_size vocab_size"]):
+    """
+    Given a tensor of inputs and targets, compute the average cross-entropy
+    loss across examples.
+
+    Args:
+        inputs (Float[Tensor, "batch_size vocab_size"]): inputs[i][j] is the
+            unnormalized logit of jth class for the ith example.
+        output (Int[Tensor, "batch_size"]): Tensor of shape (batch_size,) with the index of the correct class.
+            Each value must be between 0 and `num_classes - 1`.
+
+    Returns:
+        Float[Tensor, ""]: The average cross-entropy loss across examples.
+    """
+    """
+    tips for numerical stability:
+    1. softmax(x) = softmax(x-x_{max})
+    2. logsoftmax(x) = log \frac{e^{x_i}}{\sum e^{x_i}} = x_i- log \sum e^{x_i}
+    """
+    input_subtract_max= input - reduce(input, "... v-> ... 1", "max")# b s v
+    log_prob = input_subtract_max - input_subtract_max.logsumexp(dim=-1, keepdim=True)
+    neg_log_prob = - log_prob
+    
+    simple_prob = torch.gather(neg_log_prob, dim = -1, index =target.unsqueeze(dim=-1))
+    
+    return simple_prob.mean()
+    
         
 if __name__ == "__main__":
     vocab_size=50257
