@@ -14,6 +14,7 @@ from cs336_basics.tokenizer import Tokenizer
 from cs336_basics.model import AdamW
 from cs336_basics.model import softmax, scaled_dot_product_attention, cross_entropy
 from cs336_basics.model import gradient_clipping, cosin_learn_rate_schedule, get_batch
+from cs336_basics.model import load_checkpoint, save_checkpoint
 from cs336_basics.model import CauseMultheadSelfAttention, Linear, Embedding, RMSNorm
 from cs336_basics.model import FeedForwardNetwork, RotaryPositionEmbedding, TransformerBlock, BasicsTransformerLM
 
@@ -590,8 +591,7 @@ def run_save_checkpoint(
             we've completed.
         out (str | os.PathLike | BinaryIO | IO[bytes]): Path or file-like object to serialize the model, optimizer, and iteration to.
     """
-    raise NotImplementedError
-
+    save_checkpoint(model, optimizer, iteration, out)
 
 def run_load_checkpoint(
     src: str | os.PathLike | BinaryIO | IO[bytes],
@@ -611,8 +611,7 @@ def run_load_checkpoint(
     Returns:
         int: the previously-serialized number of iterations.
     """
-    raise NotImplementedError
-
+    return load_checkpoint(src, model, optimizer)
 
 def get_tokenizer(
     vocab: dict[int, bytes],

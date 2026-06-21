@@ -1,6 +1,7 @@
-
+import os, io
 import logging
-from typing import Optional
+from tabnanny import check
+from typing import Optional, IO, BinaryIO
 from collections.abc import Callable, Iterable
 
 import einx
@@ -555,7 +556,56 @@ def get_batch(
     corrp_lables  = np.stack([dataset[start+1:start+context_length+1] for start in starts])
     return torch.Tensor([sample_inputs, corrp_lables]).long().to(device=device)
     
+def load_checkpoint(
+    src: str | os.PathLike | BinaryIO | IO[bytes],
+    model: torch.nn.Module,
+    optimizer: torch.optim.Optimizer,
+) -> int:
+    """
+    Given a serialized checkpoint (path or file-like object), restore the
+    serialized state to the given model and optimizer.
+    Return the number of iterations that we previously serialized in
+    the checkpoint.
 
+    Args:
+        src (str | os.PathLike | BinaryIO | IO[bytes]): Path or file-like object to serialized checkpoint.
+        model (torch.nn.Module): Restore the state of this model.
+        optimizer (torch.optim.Optimizer): Restore the state of this optimizer.
+    Returns:
+        int: the previously-serialized number of iterations.
+    """
+    load_result = torch.load(src)
+
+    model.load_state_dict(load_result['model'])
+    optimizer.load_state_dict(load_result['optimizer'])
+
+    return load_result['iteration']
+
+def save_checkpoint(
+    model: torch.nn.Module,
+    optimizer: torch.optim.Optimizer,
+    iteration: int,
+    out: str | os.PathLike | BinaryIO | IO[bytes],
+):
+    """
+    Given a model, optimizer, and an iteration number, serialize them to disk.
+
+    Args:
+        model (torch.nn.Module): Serialize the state of this model.
+        optimizer (torch.optim.Optimizer): Serialize the state of this optimizer.
+        iteration (int): Serialize this value, which represents the number of training iterations
+            we've completed.
+        out (str | os.PathLike | BinaryIO | IO[bytes]): Path or file-like object to serialize the model, optimizer, and iteration to.
+    """
+    checkpoint = {
+        "model": model.state_dict(),
+        "optimizer": optimizer.state_dict(),
+        "iteration": iteration
+    }
+
+    torch.save(checkpoint, out)
+    
+    
 if __name__ == "__main__":
     vocab_size=50257
     context_length= 1024
