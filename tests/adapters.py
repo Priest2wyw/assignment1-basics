@@ -13,7 +13,7 @@ from cs336_basics.train_bpe import train_bpe
 from cs336_basics.tokenizer import Tokenizer
 from cs336_basics.model import AdamW
 from cs336_basics.model import softmax, scaled_dot_product_attention, cross_entropy
-from cs336_basics.model import gradient_clipping, cosin_learn_rate_schedule
+from cs336_basics.model import gradient_clipping, cosin_learn_rate_schedule, get_batch
 from cs336_basics.model import CauseMultheadSelfAttention, Linear, Embedding, RMSNorm
 from cs336_basics.model import FeedForwardNetwork, RotaryPositionEmbedding, TransformerBlock, BasicsTransformerLM
 
@@ -488,7 +488,7 @@ def run_get_batch(
         is the sampled input sequences, and the second tuple item is the corresponding
         language modeling labels.
     """
-    raise NotImplementedError
+    return get_batch(dataset, batch_size, context_length, device)
 
 
 def run_softmax(in_features: Float[Tensor, " ..."], dim: int) -> Float[Tensor, " ..."]:
