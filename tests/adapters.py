@@ -11,10 +11,11 @@ from jaxtyping import Bool, Float, Int
 from torch import Tensor
 from cs336_basics.train_bpe import train_bpe
 from cs336_basics.tokenizer import Tokenizer
-from cs336_basics.model import CauseMultheadSelfAttention, Linear, Embedding, RMSNorm
-from cs336_basics.model import FeedForwardNetwork, RotaryPositionEmbedding, TransformerBlock, BasicsTransformerLM
 from cs336_basics.model import AdamW
 from cs336_basics.model import softmax, scaled_dot_product_attention, cross_entropy
+from cs336_basics.model import gradient_clipping, cosin_learn_rate_schedule
+from cs336_basics.model import CauseMultheadSelfAttention, Linear, Embedding, RMSNorm
+from cs336_basics.model import FeedForwardNetwork, RotaryPositionEmbedding, TransformerBlock, BasicsTransformerLM
 
 
 def run_linear(
@@ -532,8 +533,7 @@ def run_gradient_clipping(parameters: Iterable[torch.nn.Parameter], max_l2_norm:
 
     The gradients of the parameters (parameter.grad) should be modified in-place.
     """
-    raise NotImplementedError
-
+    gradient_clipping(parameters, max_l2_norm)
 
 def get_adamw_cls() -> Any:
     """
@@ -566,8 +566,13 @@ def run_get_lr_cosine_schedule(
     Returns:
         Learning rate at the given iteration under the specified schedule.
     """
-    raise NotImplementedError
-
+    return cosin_learn_rate_schedule(
+        it,
+        max_learning_rate,
+        min_learning_rate,
+        warmup_iters,
+        cosine_cycle_iters
+    )
 
 def run_save_checkpoint(
     model: torch.nn.Module,

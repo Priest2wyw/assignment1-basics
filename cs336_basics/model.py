@@ -1,14 +1,13 @@
 
 import logging
-from math import sqrt
-from collections.abc import Callable
 from typing import Optional
+from collections.abc import Callable, Iterable
 
 import einx
 import torch
-from torch import nn
+from torch import nn, Tensor
+from math import cos, sqrt, pi
 from einops import einsum, rearrange, reduce
-from torch import Tensor
 from jaxtyping import Float, Bool, Int
 
 logger = logging.getLogger(__name__)
@@ -383,11 +382,10 @@ def cross_entropy(input:Float[Tensor, "batch_size vocab_size"],
 
     Returns:
         Float[Tensor, ""]: The average cross-entropy loss across examples.
-    """
-    """
-    tips for numerical stability:
-    1. softmax(x) = softmax(x-x_{max})
-    2. logsoftmax(x) = log \frac{e^{x_i}}{\sum e^{x_i}} = x_i- log \sum e^{x_i}
+    
+    Tips for numerical stability:
+        1. softmax(x) = softmax(x-x_{max})
+        2. logsoftmax(x) = log \frac{e^{x_i}}{\sum e^{x_i}} = x_i- log \sum e^{x_i}
     """
     input_subtract_max= input - reduce(input, "... v-> ... 1", "max")# b s v
     log_prob = input_subtract_max - input_subtract_max.logsumexp(dim=-1, keepdim=True)
@@ -456,6 +454,77 @@ class AdamW(torch.optim.Optimizer):
                 state["t"] = t + 1
                 
         return loss
+
+def cosin_learn_rate_schedule(
+    it: int,
+    max_learning_rate: float,
+    min_learning_rate: float,
+    warmup_iters: int,
+    cosine_cycle_iters: int
+    ):
+    """
+    Given the parameters of a cosine learning rate decay schedule (with linear
+    warmup) and an iteration number, return the learning rate at the given
+    iteration under the specified schedule.
+
+    Args:
+        it (int): Iteration number to get learning rate for.
+        max_learning_rate (float): alpha_max, the maximum learning rate for
+            cosine learning rate schedule (with warmup).
+        min_learning_rate (float): alpha_min, the minimum / final learning rate for
+            the cosine learning rate schedule (with warmup).
+        warmup_iters (int): T_w, the number of iterations to linearly warm-up
+            the learning rate.
+        cosine_cycle_iters (int): T_c, the number of cosine annealing iterations.
+
+    Returns:
+        Learning rate at the given iteration under the specified schedule.
+    Procss:
+        t<T_w           alpha_t = /frac{t}{T_w} alpha_{max}
+        T_w<=t<=T_c     alpha_t = alpha_{min} + 0.5*(1 + cos((frac{t-T_w}{T_c - T_w }pi))(alpha_{max}-alpha_{min})
+        t>T_c           alpha_t = alpha_{min}
+    """
+    alpha_t = 0
+    if it < warmup_iters:
+        alpha_t = it/warmup_iters * max_learning_rate
+    elif it <= cosine_cycle_iters:
+        cosin_input_const = ((it-warmup_iters)/(cosine_cycle_iters - warmup_iters))*pi 
+        cos_annealing = 0.5*(1 + cos(cosin_input_const))
+        alpha_t = min_learning_rate +  cos_annealing* (max_learning_rate - min_learning_rate)
+    else:
+        alpha_t = min_learning_rate
+    return alpha_t
+    
+def gradient_clipping(parameters: Iterable[torch.nn.Parameter], 
+                      max_l2_norm: float, 
+                      eps:float=1e-6) -> None:
+    """
+    Given a set of parameters, clip their combined gradients to have l2 norm at most max_l2_norm.
+
+    Args:
+        parameters (Iterable[torch.nn.Parameter]): collection of trainable parameters.
+        max_l2_norm (float): a positive value containing the maximum l2-norm.
+
+    The gradients of the parameters (parameter.grad) should be modified in-place.
+    """
+    gradients = [p.grad for p in parameters if p.grad is not None]
+    if len(gradients)==0:
+        return
+    # norm:1*1 gradients: len* g.shape
+    all_l2_norm = torch.sqrt(
+        sum(
+            torch.sum(g**2) for g in gradients
+            )
+        )
+    clip_coef = max_l2_norm/(all_l2_norm + eps)
+    clip_coef = min(1, clip_coef)
+    for g in gradients:
+        g.mul_(clip_coef)
+    
+    
+    
+
+
 
 if __name__ == "__main__":
     vocab_size=50257
