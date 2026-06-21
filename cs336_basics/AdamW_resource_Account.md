@@ -10,7 +10,6 @@ $$
 
 ## 0. 符号说明
 
-建议你先定义：
 ```shell
 B=batch_size
 T=context_length
@@ -164,26 +163,12 @@ $$
 | cross entropy on logits          | 通常至少和 $B \times T$ 或 $B \times T \times V$ 相关，按题目要求口径确认 |
 
 **$CE$按照$BTV$的参数量算**，那么最后的激活部分的参数量为：
-$$ {CE activations}
-L(8BTD+2BHT^2+4BTF)+BTD+2BTV
-$$
+$$ {CE activations}=L(8BTD+2BHT^2+4BTF)+BTD+2BTV$$
 
 
-这里有两个大头：
-$$
-BHT^2
-$$
-来自 attention matrix。
-
-以及：
-$$
-BTV
-$$
-来自 logits。
+这里有两个大头：$BHT^2$来自 attention matrix, 以及：$BTV$来自 logits。
 
 所以一个 sanity check 是：如果 $V$ 很大，logits activation 会非常显眼；如果 $T$ 很大，attention matrix 会显眼。
-
-
 
 ### 5. 内存总占用
 
