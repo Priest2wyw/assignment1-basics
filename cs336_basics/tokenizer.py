@@ -1,3 +1,5 @@
+import pickle
+
 import regex as re
 from collections.abc import Iterable,  Iterator
 
@@ -18,8 +20,8 @@ class Tokenizer():
 
         self.byte_to_token_id = {v:k for k,v in self.vocab.items()}
 
-    def from_files(self, 
-                vocab_filepath: str,
+    @staticmethod
+    def from_files(vocab_filepath: str,
                 merges_filepath: str,  
                 special_tokens: list[str] | None = None
                 ):
@@ -31,7 +33,11 @@ class Tokenizer():
             merges_filepath: str  
             special_tokens: list[str] | None = None
         """
-        return NotImplemented
+        with open(vocab_filepath, 'rb') as v_f:
+            vocab = pickle.load(v_f)
+        with open(merges_filepath, 'rb') as m_f:
+            merges = pickle.load(m_f)
+        return Tokenizer(vocab=vocab, merges=merges, special_tokens=special_tokens)
 
     def encode(self, text: str) -> list[int]:
         """Encode an input text into a sequence of token IDs.
@@ -116,3 +122,29 @@ class Tokenizer():
         str_bytes = list(map(self.vocab.get, ids))
         strs = b''.join(str_bytes).decode('utf-8', errors="replace")
         return strs
+
+if __name__ == "__main__":
+    import os, pathlib
+    TOKENIZER_DIR = pathlib.Path(__file__).resolve().parent.parent / "tokenizer"
+    VOCAB_PATH = os.path.join(TOKENIZER_DIR, "tinystories_bpe_vocab.pkl")
+    MERGES_PATH = os.path.join(TOKENIZER_DIR, "tinystories_bpe_merges.pkl")
+
+    tokenizer =  Tokenizer.from_files(
+        vocab_filepath=VOCAB_PATH,
+        merges_filepath=MERGES_PATH,
+        special_tokens=["<|endoftext|>"]
+        )
+
+    test_texts = [
+        "我爱北京天安门<|endoftext|>",
+        "this is a test",
+    ]
+    
+    encoded_texts = [tokenizer.encode(tx) for tx in test_texts]
+    decoded_txts = [tokenizer.decode(et) for et in encoded_texts]
+
+    for t, e, d in zip(test_texts, encoded_texts, decoded_txts):
+        print(f"原始文本为{t},\n encode_token is {e},\n decoded_text is {d}")
+    assert decoded_txts == test_texts
+
+    

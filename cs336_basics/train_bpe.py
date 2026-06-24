@@ -1,4 +1,6 @@
 import os
+import pickle
+import pathlib
 import regex as re
 from time import time 
 from copy import deepcopy
@@ -236,9 +238,26 @@ def train_bpe(input_path: str,
     return vocab, merges
 
 if __name__ == "__main__":
+    # Tokenizer保存路径
+    TOKENIZER_DIR = pathlib.Path(__file__).resolve().parent.parent / "tokenizer"
+    VOCAB_PATH = os.path.join(TOKENIZER_DIR, "tinystories_bpe_vocab.pkl")
+    MERGES_PATH = os.path.join(TOKENIZER_DIR, "tinystories_bpe_merges.pkl")
+
     # input_path = "/home/youwei/github/cs336/assignment1-basics/TinyStoriesV2-GPT4-valid.txt"
     input_path = "/home/youwei/github/cs336/assignment1-basics/TinyStoriesV2-GPT4-train.txt"
     # input_path = "/home/youwei/github/cs336/assignment1-basics/test_dataset_800k.txt"
     vocab_size = 10000
     special_tokens = ["<|endoftext|>"]
     vocab, merges = train_bpe(input_path, vocab_size, special_tokens)
+
+    # 序列化到磁盘
+    os.makedirs(TOKENIZER_DIR, exist_ok=True)
+    with open(VOCAB_PATH, "wb") as f:
+        pickle.dump(vocab, f)
+    with open(MERGES_PATH, "wb") as f:
+        pickle.dump(merges, f)
+
+    # 统计最长 token
+    longest_token = max(vocab.values(), key=len)
+    print("最长token:", longest_token, "长度:", len(longest_token))
+
