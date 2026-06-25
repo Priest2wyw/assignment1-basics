@@ -1,7 +1,9 @@
 import pickle
-
 import regex as re
 from collections.abc import Iterable,  Iterator
+
+from tqdm import tqdm
+import numpy as np
 
 PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 class Tokenizer():
@@ -20,8 +22,8 @@ class Tokenizer():
 
         self.byte_to_token_id = {v:k for k,v in self.vocab.items()}
 
-    @staticmethod
-    def from_files(vocab_filepath: str,
+    @classmethod
+    def from_files(cls, vocab_filepath: str,
                 merges_filepath: str,  
                 special_tokens: list[str] | None = None
                 ):
@@ -37,7 +39,7 @@ class Tokenizer():
             vocab = pickle.load(v_f)
         with open(merges_filepath, 'rb') as m_f:
             merges = pickle.load(m_f)
-        return Tokenizer(vocab=vocab, merges=merges, special_tokens=special_tokens)
+        return cls(vocab=vocab, merges=merges, special_tokens=special_tokens)
 
     def encode(self, text: str) -> list[int]:
         """Encode an input text into a sequence of token IDs.
@@ -123,6 +125,31 @@ class Tokenizer():
         strs = b''.join(str_bytes).decode('utf-8', errors="replace")
         return strs
 
+def encode_txt_as_numpy_array(tokenizer, path_to_txt, save_path):
+    with open(path_to_txt, 'r') as f:
+        num_lines = sum(1 for _ in f)
+    
+    # 第一步：统计总token数（需要遍历一遍）
+    total_tokens = 0
+    with open(path_to_txt, 'r') as f:
+        for line in tqdm(f, total=num_lines, desc="Counting tokens"):
+            total_tokens += len(tokenizer.encode(line))
+
+    # 第二步：创建memmap
+    dtype = np.int32
+    tokens_mm = np.memmap(save_path, dtype=dtype, mode='w+', shape=(total_tokens,))
+
+    # 第三步：再次遍历写入
+    pos = 0
+    with open(path_to_txt, 'r') as f:
+        for line in tqdm(f, total=num_lines, desc="Tokenizing"):
+            ids = tokenizer.encode(line)
+            n = len(ids)
+            tokens_mm[pos:pos+n] = ids
+            pos += n
+
+    tokens_mm.flush()
+
 if __name__ == "__main__":
     import os, pathlib
     TOKENIZER_DIR = pathlib.Path(__file__).resolve().parent.parent / "tokenizer"
@@ -146,5 +173,12 @@ if __name__ == "__main__":
     for t, e, d in zip(test_texts, encoded_texts, decoded_txts):
         print(f"原始文本为{t},\n encode_token is {e},\n decoded_text is {d}")
     assert decoded_txts == test_texts
-
     
+    process_data = True
+    if process_data:
+        TRAIN_TXT_DATA_PATH="/home/youwei/github/cs336/assignment1-basics/TinyStoriesV2-GPT4-train.txt"
+        VAL_TXT_DATA_PATH=  "/home/youwei/github/cs336/assignment1-basics/TinyStoriesV2-GPT4-valid.txt"
+        TRAIN_DATA_PATH=    "/home/youwei/github/cs336/assignment1-basics/data/TinyStoriesV2-GPT4-train.npy"
+        VAL_DATA_PATH=      "/home/youwei/github/cs336/assignment1-basics/TinyStoriesV2-GPT4-valid.npy"
+        encode_txt_as_numpy_array(tokenizer, TRAIN_TXT_DATA_PATH, TRAIN_DATA_PATH)
+        encode_txt_as_numpy_array(tokenizer, VAL_TXT_DATA_PATH, VAL_DATA_PATH)
