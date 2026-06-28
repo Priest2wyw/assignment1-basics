@@ -6,6 +6,8 @@ import regex as re
 from typing import Any, Iterable, Iterator
 
 import numpy as np
+from numpy.lib.format import open_memmap
+from tqdm import tqdm
 
 GPT2_PRETOKENIZE_PATTERN = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 
@@ -222,7 +224,7 @@ def encode_txt_as_numpy_array(tokenizer, path_to_txt, save_path):
 
     # 第二步：创建memmap
     dtype = np.int32
-    tokens_mm = np.memmap(save_path, dtype=dtype, mode='w+', shape=(total_tokens,))
+    tokens_mm = open_memmap(save_path, dtype=dtype, mode='w+', shape=(total_tokens,))
 
     # 第三步：再次遍历写入
     pos = 0
@@ -261,9 +263,10 @@ if __name__ == "__main__":
     
     process_data = True
     if process_data:
-        TRAIN_TXT_DATA_PATH="/home/youwei/github/cs336/assignment1-basics/TinyStoriesV2-GPT4-train.txt"
-        VAL_TXT_DATA_PATH=  "/home/youwei/github/cs336/assignment1-basics/TinyStoriesV2-GPT4-valid.txt"
-        TRAIN_DATA_PATH=    "/home/youwei/github/cs336/assignment1-basics/data/TinyStoriesV2-GPT4-train.npy"
-        VAL_DATA_PATH=      "/home/youwei/github/cs336/assignment1-basics/TinyStoriesV2-GPT4-valid.npy"
+        DATA_DIR = pathlib.Path(__file__).resolve().parent.parent
+        TRAIN_TXT_DATA_PATH=os.path.join(DATA_DIR, "TinyStoriesV2-GPT4-train.txt")
+        VAL_TXT_DATA_PATH=  os.path.join(DATA_DIR, "TinyStoriesV2-GPT4-valid.txt")
+        TRAIN_DATA_PATH=    os.path.join(DATA_DIR, "data/TinyStoriesV2-GPT4-train.npy")
+        VAL_DATA_PATH=      os.path.join(DATA_DIR, "data/TinyStoriesV2-GPT4-valid.npy")
         encode_txt_as_numpy_array(tokenizer, TRAIN_TXT_DATA_PATH, TRAIN_DATA_PATH)
         encode_txt_as_numpy_array(tokenizer, VAL_TXT_DATA_PATH, VAL_DATA_PATH)

@@ -246,7 +246,7 @@ class CauseMultheadSelfAttention(nn.Module):
         # tensor([[0., 1., 1.],
         #         [0., 0., 1.],
         #         [0., 0., 0.]])
-        masked_matrix = torch.triu(torch.ones([seq_len, seq_len]), diagonal=1) < 0.5
+        masked_matrix = torch.triu(torch.ones([seq_len, seq_len], device=in_features.device), diagonal=1) < 0.5
         atten_out = scaled_dot_product_attention(Q=Q, K=K, V=V, mask=masked_matrix) # ... num_head seq d_v
         
         # W_O: d_model*(num_head d_v)
@@ -400,7 +400,7 @@ def cross_entropy(input:Float[Tensor, "batch_size vocab_size"],
     
     
 class AdamW(torch.optim.Optimizer):
-    def __init__(self, params, lr, betas, eps, weight_decay):
+    def __init__(self, params, lr=1e-3, betas= (0.9, 0.999), eps=1e-8, weight_decay=1e-2):
         if lr < 0:
             raise ValueError(f"Invalid learning rate: {lr}")
         if eps < 0:
