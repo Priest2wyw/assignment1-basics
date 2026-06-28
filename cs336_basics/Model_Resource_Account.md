@@ -1,6 +1,6 @@
 # AdamW resource Account
 
-你这个题本质是 **资源会计题**，不是 optimizer 实现题。核心是把所有东西拆成：
+需要的数据量可以拆分为：
 $$
 \text{memory} = \text{parameters} + \text{gradients} + \text{optimizer state} + \text{activations}
 $$
